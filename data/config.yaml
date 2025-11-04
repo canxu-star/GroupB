@@ -1,0 +1,37 @@
+# --- 数据处理配置文件 ---
+
+# 1. 模型与数据集标识符
+identifiers:
+  tokenizer_name: "GSAI-ML/LLaDA-8B-Instruct"
+  dataset_name: "Salesforce/wikitext"
+  dataset_subset: "wikitext-2-raw-v1"
+
+# 2. 特殊 Token ID
+special_tokens:
+  del_token_id: 126339
+  pad_token_id: 126081
+  mask_token_id: 126336
+
+# 3. 数据处理参数
+processing_params:
+  min_len: 50
+  max_len: 1024
+  final_len: 2048
+
+# 4. 数据增强概率
+augmentation_probs:
+  p1_corrupt_rate: 0.15  # token被改错的概率
+  p2_drop_rate: 0.3      # 随机丢弃有效token的概率
+  p3_mask_rate: 0.5      # 剩余token被mask的概率
+
+# 5. Attention Mask 中使用的ID
+attention_mask_ids:
+  error_id: 2       # 代表被故意改错的token
+  # invalid_id:      # 代表无效位置 (填充、丢弃、未激活的del)
+  effective_id: 0   # 代表有效位置 (普通token或激活的del)
+
+# 6. 默认运行设置
+defaults:
+  num_proc: 8       # 默认使用的CPU核心数
+  cache_dir: "./hf_cache" # Hugging Face数据集和模型的缓存目录
+  output_dir: "./processed_data" # 处理后数据的保存目录
