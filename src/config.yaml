@@ -1,12 +1,14 @@
+mode: train_sft
 data:
   name: "Salesforce/wikitext"
   path: ./data/wikitext-2-raw-v1
+  save_path: ./data/processed_data
   train_batch_size: 8
   micro_batch_size_per_gpu: 2
-  train_files:./wikitext-2-raw-v1/wiki.train.raw
-  val_files: ./wikitext-2-raw-v1/wiki.test.raw
-  prompt_key: text
-  response_key: text
+  train_name: train
+  val_name: eval
+  prompt_key: None
+  response_key: None
   max_length: 1024
   balance_dp_token: True
   err_prob: 0.05
@@ -30,8 +32,6 @@ optim:
 trainer:
   default_local_dir: ./sft_model
   default_hdfs_dir: hdfs://tmp/experiments/gsm8k/gemma-1.1-7b-it/
-  resume_path: null
-  resume_training: True
   project_name: shushurun-sft
   experiment_name: test
   total_epochs: 3
