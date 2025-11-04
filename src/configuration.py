@@ -128,6 +128,8 @@ class TrainingConfig:
     total_training_steps: int = None
     logger: list = field(default_factory=lambda: ["console"])
     save_checkpoint_steps: int = 10
+    w1: float = 0.8
+    w2: float = 0.2
     early_stopping: dict = field(default_factory=lambda: {
         "open": True,
         "monitor": "eval_loss",

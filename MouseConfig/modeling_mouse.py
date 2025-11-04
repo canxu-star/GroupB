@@ -543,7 +543,7 @@ def alibi_attention_bias(seq_len: int, config: ModelConfig, device: torch.device
 
     # shape: (1, n_heads, seq_len, seq_len)
     return alibi_bias * (1.0 / (2 ** m.view(1, config.n_heads, 1, 1)))  # type: ignore
-
+'''
 # =========================================================================================
 # ===== 步骤 1: 新增一个类来定义第三个头的聚合和输出逻辑 =====
 # =========================================================================================
@@ -574,7 +574,7 @@ class SequenceAggregationHead(nn.Module):
     def reset_parameters(self):
         """为这个头中的层初始化权重"""
         init_weights(self.config, self.predictor, type_of_module=ModuleType.final_out)
-
+'''
 
 class MouseBlock(nn.Module):
     """
@@ -1012,7 +1012,7 @@ class MouseOutput(NamedTuple):
     Logits from the second head.
     """
 
-    time_logit: torch.FloatTensor
+    # time_logit: torch.FloatTensor
     """
     Logits from the third head.
     """
@@ -1186,7 +1186,7 @@ class MouseModel(nn.Module):
                 config.d_model, self.hidden_size, bias=config.include_bias, device=config.init_device
             ),
             "act_head2": act_fn_for_head2,
-            "ff_out_head2": nn.Linear(
+            "ff_2out_head": nn.Linear(
                 int(act_fn_for_head2.output_multiplier * self.hidden_size),
                 config.embedding_size or config.vocab_size,
                 bias=config.include_bias,
@@ -1205,9 +1205,11 @@ class MouseModel(nn.Module):
             )
         })
         """
+        """
         self.transformer.update({
             "ff_out_head3": SequenceAggregationHead(config)
         })
+        """
         # ===== 修改结束 =====
         
         # When `init_device="meta"` FSDP will call `reset_parameters()` to initialize weights.
@@ -1257,13 +1259,15 @@ class MouseModel(nn.Module):
             init_weights(self.config, self.transformer.ff_out, type_of_module=ModuleType.final_out)  # type: ignore
 
         # ===== 修改开始：初始化新输出头的权重 =====
-        if hasattr(self.transformer, "ff_out_head2"):
+        if hasattr(self.transformer, "ff_2out_head"):
             init_weights(self.config, self.transformer.ff_proj_head2, d=self.config.d_model, layer_id=None, type_of_module=ModuleType.in_module)
             init_weights(self.config, self.transformer.up_proj_head2, d=self.config.d_model, layer_id=None, type_of_module=ModuleType.in_module)
-            init_weights(self.config, self.transformer.ff_out_head2, type_of_module=ModuleType.final_out)
+            init_weights(self.config, self.transformer.ff_2out_head, type_of_module=ModuleType.final_out)
             # init_weights(self.config, self.transformer.ff_out_head3, type_of_module=ModuleType.final_out)
+        """
         if hasattr(self.transformer, "ff_out_head3"):
             self.transformer.ff_out_head3.reset_parameters()
+        """
         # ===== 修改结束 =====
 
         # Let the blocks handle themselves.
@@ -1505,7 +1509,7 @@ class MouseModel(nn.Module):
 
         # 第三个输出头 (linear)
         # logits_head3 = self.transformer.ff_out_head3(x)
-
+        '''
         # 第三个输出头 (新的聚合类) <--- 修改后的代码
         logit_head3 = self.transformer.ff_out_head3(x)
 
@@ -1514,11 +1518,11 @@ class MouseModel(nn.Module):
             logits_head2.mul_(1 / math.sqrt(self.config.d_model))
             # 第三个头的输出通常不需要缩放，因为它不是 logits
             # value_head3.mul_(...) # <--- 注意：这里可能不需要
-
+        '''
         return MouseOutput(
             logits=logits, 
             insert_logits=logits_head2,
-            time_logit=logit_head3,
+            # time_logit=logit_head3,
             attn_key_values=attn_key_values, 
             hidden_states=tuple(all_hidden_states) if output_hidden_states else None
         )
