@@ -32,7 +32,7 @@ from transformers.models.auto import AutoModel
 from transformers.cache_utils import Cache
 
 from .configuration_mouse import (
-    MouseConfig,
+    MouseModelConfig,
     StrEnum,
     InitFnType,
     ActivationType,
@@ -768,6 +768,9 @@ class MouseBlock(nn.Module):
 
         # Get the attention scores.
         # shape: (B, nh, T, hs)
+        # print(q.shape, k.shape, v.shape, attention_bias.shape if attention_bias is not None else None)
+
+        
         att = self._scaled_dot_product_attention(
             q,
             k,
@@ -1415,7 +1418,21 @@ class MouseModel(nn.Module):
                 mask_len = attention_mask.shape[-1]
             elif past_key_values is not None:
                 mask_len = past_key_values[0][0].shape[-2] + seq_len
-            attention_bias = attention_bias[:, :, :mask_len, :mask_len].to(dtype=torch.float)
+            
+            
+            if attention_bias is not None:
+                # 如果原始为 [batch, seq_len]
+                if attention_bias.dim() == 2:
+                    # 扩展成 [batch, 1, seq_len, seq_len]
+                    attention_bias = attention_bias.unsqueeze(1).unsqueeze(2)  # [B, 1, 1, S]
+                    attention_bias = attention_bias.expand(-1, 1, attention_bias.size(-1), attention_bias.size(-1))
+                elif attention_bias.dim() == 3:
+                    # 如果已经是 [batch, seq_len, seq_len]
+                    attention_bias = attention_bias.unsqueeze(1)  # -> [batch, 1, seq_len, seq_len]
+            
+                attention_bias = attention_bias[:, :, :mask_len, :mask_len].to(dtype=torch.float)
+
+
 
             # Add in the masking bias.
             if attention_mask is not None:
@@ -1505,7 +1522,7 @@ class MouseModel(nn.Module):
         x_head2_ff = self.transformer.ff_proj_head2(x)
         x_head2_up = self.transformer.up_proj_head2(x)
         x_head2_act = self.transformer.act_head2(x_head2_ff) * x_head2_up
-        logits_head2 = self.transformer.ff_out_head2(x_head2_act)
+        logits_head2 = self.transformer.ff_2out_head(x_head2_act)
 
         # 第三个输出头 (linear)
         # logits_head3 = self.transformer.ff_out_head3(x)
@@ -1529,7 +1546,7 @@ class MouseModel(nn.Module):
         # ===== 修改结束 =====
 
 
-def create_model_config_from_pretrained_config(config: MouseConfig):
+def create_model_config_from_pretrained_config(config: MouseModelConfig):
     """
     Utility function
     """
@@ -1547,11 +1564,11 @@ class MouseModelLM(PreTrainedModel):
     Extremely barebones HF model wrapper.
     """
 
-    config_class = MouseConfig
+    config_class = MouseModelConfig
     base_model_prefix = "model"
     _no_split_modules = ["MouseBlock", "MouseSequentialBlock", "MouseLlamaBlock"]
 
-    def __init__(self, config: MouseConfig, model: Optional[MouseModel] = None, init_params: bool = False):
+    def __init__(self, config: MouseModelConfig, model: Optional[MouseModel] = None, init_params: bool = False):
         super().__init__(config)
 
         if not model:
@@ -1600,7 +1617,7 @@ class MouseModelLM(PreTrainedModel):
         # ===== 修改开始: 解包所有输出头的 logits =====
         logits = outputs.logits
         head2_logits = outputs.insert_logits
-        head3_logit = outputs.time_logit
+        # head3_logit = outputs.time_logit
         hidden_states = outputs.hidden_states
 
         loss = None
@@ -1618,13 +1635,14 @@ class MouseModelLM(PreTrainedModel):
 
         if not return_dict:
             # 将所有头的 logits 添加到元组输出中
-            output = (logits, head2_logits, head3_logit) + outputs[3:] # outputs[3:] 包含 attn_key_values 和 hidden_states
+            #output = (logits, head2_logits, head3_logit) + outputs[3:] # outputs[3:] 包含 attn_key_values 和 hidden_states
+            output = (logits, head2_logits) + outputs[2:] # outputs[3:]
             return (loss,) + output if loss is not None else output
 
         return MouseOutput(
             logits=logits,
             insert_logits=head2_logits,
-            time_logit=head3_logit,
+            # time_logit=head3_logit,
             attn_key_values=outputs.attn_key_values,
             hidden_states=hidden_states,
         )
@@ -1696,4 +1714,4 @@ class MouseModelLM(PreTrainedModel):
     def block_diffusion_generate(self):
         pass
 # Register the model so that it is available for transformer pipelines, auto-loading, etc.
-AutoModel.register(MouseConfig, MouseModelLM)
+AutoModel.register(MouseModelConfig, MouseModelLM)

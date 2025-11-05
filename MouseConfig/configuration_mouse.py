@@ -430,7 +430,7 @@ class ActivationCheckpointingStrategy(StrEnum):
     """
 
 
-class MouseConfig(PretrainedConfig):
+class MouseModelConfig(PretrainedConfig):
     model_type = "mouse"
     keys_to_ignore_at_inference = ["past_key_values"]  # TODO: confirm
 
@@ -460,4 +460,4 @@ class MouseConfig(PretrainedConfig):
 
 
 # Register the config class so that it is available for transformer pipelines, auto-loading etc.
-AutoConfig.register("mouse", MouseConfig)
+AutoConfig.register("mouse", MouseModelConfig)

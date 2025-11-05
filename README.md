@@ -19,7 +19,7 @@ python run_processing.py --split test --output_dir ./custom_output
 ```
 
 ---
-### Download requirements
+### Download requirements and models
 run following to download requirements:
 ```bash
 bash pip_pods.sh
