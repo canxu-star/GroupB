@@ -20,7 +20,7 @@ processing_params:
 
 # 4. 数据增强概率
 augmentation_probs:
-  p1_corrupt_rate: 0.15  # token被改错的概率
+  p1_corrupt_rate: 0.2  # token被改错的概率
   p2_drop_rate: 0.3      # 随机丢弃有效token的概率
   p3_mask_rate: 0.5      # 剩余token被mask的概率
 

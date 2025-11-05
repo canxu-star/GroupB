@@ -46,6 +46,8 @@ def process_single_sample(
 ) -> Optional[Dict[str, List[int]]]:
     """对单个文本样本执行完整的转换逻辑。"""
     vocab_size = tokenizer.vocab_size
+
+    t = random.uniform(0, 1)
     
     # 特殊 Token ID
     DEL_TOKEN_ID = config.special_tokens.del_token_id
@@ -55,9 +57,9 @@ def process_single_sample(
     MIN_LEN = config.processing_params.min_len
     MAX_LEN = config.processing_params.max_len
     FINAL_LEN = config.processing_params.final_len
-    P1_CORRUPT_RATE = config.augmentation_probs.p1_corrupt_rate
-    P2_DROP_RATE = config.augmentation_probs.p2_drop_rate
-    P3_MASK_RATE = config.augmentation_probs.p3_mask_rate
+    P1_CORRUPT_RATE = config.augmentation_probs.p1_corrupt_rate * t
+    P2_DROP_RATE = config.augmentation_probs.p2_drop_rate * t
+    P3_MASK_RATE = config.augmentation_probs.p3_mask_rate * t
     
     attn_ids = config.attention_mask_ids
     ERROR_ID = attn_ids.error_id
@@ -70,7 +72,7 @@ def process_single_sample(
         return None
 
     # 2. 交错插入 'del' token 并创建初始 attention_mask
-    original_len = len(token_ids)
+    original_len = len(token_ids) 
     interleaved_ids = [INVALID_ID] * (original_len * 2)
     attention_mask = [INVALID_ID] * (original_len * 2)
     for i in range(original_len):
@@ -120,18 +122,21 @@ def process_single_sample(
             interleaved_ids[i] = MASK_TOKEN_ID
 
     # 7.1 填充/截断 interleaved_ids
+    interleaved_ids = [tokenizer.bos_token_id, DEL_TOKEN_ID] + interleaved_ids
     current_len_interleaved = len(interleaved_ids)
     if current_len_interleaved < FINAL_LEN:
         interleaved_ids.extend([PAD_TOKEN_ID] * (FINAL_LEN - current_len_interleaved))
     interleaved_ids = interleaved_ids[:FINAL_LEN]
 
     # 7.2 填充/截断 attention_mask
+    attention_mask = [EFFECTIVE_ID, INVALID_ID] + attention_mask
     current_len_attn = len(attention_mask)
     if current_len_attn < FINAL_LEN:
         attention_mask.extend([INVALID_ID] * (FINAL_LEN - current_len_attn))
     attention_mask = attention_mask[:FINAL_LEN]
 
     # 7.3 填充/截断 labels (这是最关键的修复)
+    labels = [tokenizer.bos_token_id, DEL_TOKEN_ID] + labels
     current_len_labels = len(labels)
     if current_len_labels < FINAL_LEN:
         labels.extend([PAD_TOKEN_ID] * (FINAL_LEN - current_len_labels))

@@ -11,8 +11,26 @@ from tqdm import tqdm
 from configuration import TotalConfig
 import sys
 from datasets import load_from_disk
+import logging
 # 一个示例的数据集读取库
 # from src import dataprepare
+from datetime import datetime
+# ****** 新增: 日志记录函数 ******
+def setup_logger(log_file="log.txt"):
+    """
+    创建一个简单的日志函数，用于将消息附加到文件。
+    """
+    def log_message(message):
+        """
+        将带时间戳的消息写入日志文件。
+        """
+        with open(log_file, 'a', encoding='utf-8') as f:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            f.write(f"{timestamp} - {message}\n")
+    return log_message
+
+# ****** 新增结束 ******
+
 
 def load_yaml_config(config_path):
     """加载YAML配置文件。"""
@@ -130,22 +148,17 @@ def cast_optimizer_state_to_bf16(optimizer):
 # ****** 新增开始: 评估函数（保持原样，但确保 eval 下无 autocast 影响） ******
 def evaluate_model(model, dataloader, device, loss1_fn, loss2_fn, w1, w2):
     model.eval()
-    print("the model have been switched to eval model!")
+    tqdm.write("The model has been switched to eval mode!")
     total_eval_loss = 0
-    sum=0
     with torch.no_grad():
-        print("no_grad:open!")
         for batch in dataloader:
-            print("batch{sum} is evaluating!")
             batch = {k: v.to(device) for k, v in batch.items()}
             original_attention_mask = batch["attention_mask_ids"]
-            print("got the attn mask!")
             attention_bias_for_model = original_attention_mask.clone()
             attention_bias_for_model[attention_bias_for_model == 2] = 0
 
             # 在验证里同样使用 autocast(bfloat16) 以保持一致（若设备不支持则不会启用）
             if device_supports_bf16(device):
-                print("autocast()is running!")
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                     outputs = model(
                         input_ids=batch["output_ids"],
@@ -165,7 +178,6 @@ def evaluate_model(model, dataloader, device, loss1_fn, loss2_fn, w1, w2):
             active_loss = batch["output_ids"].view(-1) == mask_token_id
             active_logits = logits_head1.view(-1, model.config.vocab_size)[active_loss]
             active_labels = clean_labels.view(-1)[active_loss]
-            print("calculate over")
             if active_logits.shape[0] > 0:
                 loss1_val = loss1_fn(active_logits, active_labels)
             else:
@@ -180,12 +192,17 @@ def evaluate_model(model, dataloader, device, loss1_fn, loss2_fn, w1, w2):
 
             total_loss = w1 * loss1_val + w2 * loss2_val
             total_eval_loss += total_loss.item()
+            
 
     model.train()
     return total_eval_loss / len(dataloader)
 # ****** 新增结束 ******
 
 def main():
+    log = setup_logger("log.txt")
+    log("--- Starting New Training Session ---")
+    
+    
     output_dir = "./data/processed_data"
     train_dataset_path = os.path.join(output_dir, "wikitext-2-raw-v1-processed-train")
     eval_dataset_path = os.path.join(output_dir, "wikitext-2-raw-v1-processed-validation")
@@ -198,6 +215,8 @@ def main():
     print("--- 最终生效的配置 ---")
     print(config)
 
+    log(f"Configuration: {config}")
+    
     device = torch.device("cuda" if torch.cuda.is_available()  else "cpu")
 
     # 加载模型（先用默认 dtype，然后按需转换到 bf16）
@@ -243,8 +262,8 @@ def main():
     train_dataset.set_format("torch")
     eval_dataset.set_format("torch")
     train_dataloader = DataLoader(train_dataset, batch_size=config.data.train_batch_size, shuffle=True)
-    eval_dataloader = DataLoader(eval_dataset, batch_size=config.data.train_batch_size, shuffle=False)
-
+    print("=======================================================================================")
+    print(len(train_dataloader))
     # 优化器（保持原有实现）
     lr = config.optim.lr
     if isinstance(lr, str):
@@ -265,23 +284,26 @@ def main():
     w2 = config.trainer.w2
     loss1_fn = nn.CrossEntropyLoss()
     loss2_fn = nn.CrossEntropyLoss()
-
-    eval_steps = 40
+    # =============================================================================
+    eval_steps = 1000
     early_stopping_patience = 3
     early_stopping_threshold = 0.01
     early_stopping_counter = 0
     best_eval_loss = float('inf')
     global_step = 0
     training_should_stop = False
+    eval_samples=500
 
     checkpoint_dir = config.trainer.checkpoint_dir
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    progress_bar = tqdm(range(num_training_steps))
+    
     model.train()
 
     # 主训练循环：使用 autocast(bfloat16) for forward；在 backward 后把 grads 转为 bf16；在 optimizer.step 后把 optimizer state 转为 bf16
     for epoch in range(num_epochs):
+        progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=True)
+        train_dataloader = DataLoader(train_dataset, batch_size=config.data.train_batch_size, shuffle=True)
         for batch in train_dataloader:
             batch = {k: v.to(device) for k, v in batch.items()}
             original_attention_mask = batch["attention_mask_ids"]
@@ -313,10 +335,21 @@ def main():
             active_labels = clean_labels.view(-1)[active_loss]
 
             if active_logits.shape[0] > 0:
-                loss1_val = loss1_fn(active_logits, active_labels) / active_labels.numel()
+                loss1_val = loss1_fn(active_logits, active_labels) # / active_labels.numel()
             else:
                 loss1_val = torch.tensor(0.0, device=device)
 
+            # ---- 新增: del_loss 计算 ----
+            # 条件：标签==126339 且 attention_bias_for_model==0
+            target_token_id = 126339
+            mask_del = (clean_labels == target_token_id) & (attention_bias_for_model == 0)
+            if mask_del.any():
+                del_logits = logits_head1[mask_del]
+                del_labels = clean_labels[mask_del]
+                del_loss_val = loss1_fn(del_logits, del_labels)
+            else:
+                del_loss_val = torch.tensor(0.0, device=device)
+            
             logits_head2 = outputs.insert_logits
             labels_head2 = generate_labels_for_head2(
                 attention_mask=original_attention_mask,
@@ -327,7 +360,7 @@ def main():
                 loss2_val = loss2_fn(
                     logits_head2.view(-1, model.config.vocab_size),
                     labels_head2.view(-1)
-                ) / token_count_head2
+                ) # / token_count_head2
             else:
                 loss2_val = torch.tensor(0.0, device=device)
             """
@@ -364,16 +397,23 @@ def main():
             optimizer.zero_grad()
 
             global_step += 1
-            progress_bar.update(1)
-            progress_bar.set_description(f"Epoch {epoch+1}, Step {global_step}, Loss: {total_loss.item():.4f},Loss1: {loss1_val.item():.4f}, Loss2: {loss2_val.item():.4f}")
+            progress_bar.set_postfix(loss=f"{total_loss.item():.4f}", loss1=f"{loss1_val.item():.4f}", loss2=f"{loss2_val.item():.4f}",loss_del=f"{del_loss_val.item():.4f}")
 
+            # ****** 新增: 记录训练步骤日志 ******
+            log(f"Train Step {global_step} | Epoch {epoch+1} | Loss: {total_loss.item():.4f} | Loss1: {loss1_val.item():.4f} | Loss2: {loss2_val.item():.4f} | Del Loss: {del_loss_val.item():.4f}")
+            
             if global_step % eval_steps == 0:
+                random_subset_eval_dataset = eval_dataset.shuffle().select(range(eval_samples))
+                eval_dataloader = DataLoader(random_subset_eval_dataset, batch_size=config.data.train_batch_size, shuffle=False)
                 current_eval_loss = evaluate_model(model, eval_dataloader, device, loss1_fn, loss2_fn, w1, w2)
-                print(f"\nStep {global_step}: Eval Loss = {current_eval_loss:.4f}, Best Eval Loss = {best_eval_loss:.4f}")
-
+                tqdm.write(f"Step {global_step}: Eval Loss = {current_eval_loss:.4f}, Best Eval Loss = {best_eval_loss:.4f}")
+                # ****** 新增: 记录评估日志 ******
+                log(f"Evaluation after Step {global_step} | Eval Loss: {current_eval_loss:.4f} | Best Eval Loss: {best_eval_loss:.4f}")
                 if current_eval_loss < best_eval_loss:
-                    print(f"Eval loss improved from {best_eval_loss:.4f} to {current_eval_loss:.4f}. Saving model...")
+                    tqdm.write(f"Eval loss improved from {best_eval_loss:.4f} to {current_eval_loss:.4f}. Saving model...")
                     best_eval_loss = current_eval_loss
+                    # ****** 新增: 记录模型保存日志 ******
+                    log(f"Eval loss improved. Saving model at step {global_step}.")
                     # 保存模型时注意：HuggingFace 的 save_pretrained 可能期望参数为 fp32/float32
                     # 为安全起见，我们在保存前把模型参数临时转换回 fp32
                     if use_bf16:
@@ -381,23 +421,27 @@ def main():
                         save_temp = {n: p.detach().to(dtype=torch.float32, device='cpu') for n, p in model.named_parameters()}
                         # 将这些数据回写到 model 的 state_dict 再保存（更安全的方法是使用 state_dict 并手工转换）
                         # 这里用简单方式：先转换模型到 cpu float32，保存，再恢复到 cuda bf16
-                        model_cpu = AutoModel.from_pretrained(config.model_path)  # reload base to get same structure
+                        # model_cpu = AutoModel.from_pretrained(config.model.path)  # reload base to get same structure
                         # 更简单：直接使用 model.state_dict(), 然后手动转换并保存
                         sd = model.state_dict()
                         sd_fp32 = {k: v.to(dtype=torch.float32, device='cpu') for k, v in sd.items()}
                         torch.save(sd_fp32, os.path.join(checkpoint_dir, f"pytorch_model_step{global_step}.pt"))
-                        print(f"Saved bf16->fp32 converted state to {checkpoint_dir}")
+                        tqdm.write(f"Saved bf16->fp32 converted state to {checkpoint_dir}")
                     else:
                         model.save_pretrained(checkpoint_dir)
                     early_stopping_counter = 0
                 elif current_eval_loss > best_eval_loss + early_stopping_threshold:
                     early_stopping_counter += 1
-                    print(f"Eval loss did not improve for {early_stopping_counter} time(s).")
+                    tqdm.write(f"Eval loss did not improve for {early_stopping_counter} time(s).")
+                    # ****** 新增: 记录早停计数器日志 ******
+                    log(f"Eval loss did not improve. Early stopping counter: {early_stopping_counter}")
                 else:
                     early_stopping_counter = 0
 
                 if early_stopping_counter >= early_stopping_patience:
-                    print(f"Stopping training early after {early_stopping_patience} evaluations without improvement.")
+                    tqdm.write(f"Stopping training early after {early_stopping_patience} evaluations without improvement.")
+                     # ****** 新增: 记录早停日志 ******
+                    log(f"Early stopping triggered after {early_stopping_patience} evaluations without improvement.")
                     training_should_stop = True
                     break
         if training_should_stop:

@@ -165,7 +165,7 @@ class TotalConfig:
     diffusion:diffusionConfig = field(default_factory=diffusionConfig)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
+    def from_dict(cls, data: Dict[str, Any]) -> "TotalConfig":
         """
         一个类方法工厂,用于从字典创建AppConfig实例。
         """
