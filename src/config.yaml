@@ -1,9 +1,9 @@
-mode: train_sft
+
 data:
   name: "Salesforce/wikitext"
   path: ./data/wikitext-2-raw-v1
   save_path: ./data/processed_data
-  train_batch_size: 8
+  train_batch_size: 2
   micro_batch_size_per_gpu: 2
   train_name: train
   val_name: eval
@@ -14,7 +14,7 @@ data:
   err_prob: 0.05
   noise_prob_policy: Linear/Fixed/Importance
 model:
-  path_from_pretrained: ./
+  path: /workspace/LLaDA-8B-Instruct
   fsdp_config:
     pass: pass
   check_point_saves: ./
@@ -38,6 +38,9 @@ trainer:
   total_training_steps: null
   logger: ['console']
   save_checkpoint_steps: 10
+  w1: 0.8
+  w2: 0.2
+  checkpoint_dir: ./checkpoints
   early_stopping:
     open: True
     monitor: eval_loss

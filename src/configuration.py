@@ -97,7 +97,7 @@ class loraConfig:
 
 @dataclass
 class modelConfig:
-    path_from_pretrained: str = "facebook/opt-1.3b"
+    path: str = "facebook/opt-1.3b"
     """
     The path or identifier of the pretrained model to load.
     """
@@ -130,6 +130,8 @@ class TrainingConfig:
     save_checkpoint_steps: int = 10
     w1: float = 0.8
     w2: float = 0.2
+    checkpoint_dir: str = "./checkpoints"
+    use_bf16: bool = True
     early_stopping: dict = field(default_factory=lambda: {
         "open": True,
         "monitor": "eval_loss",
@@ -147,7 +149,7 @@ class diffusionConfig:
 @dataclass
 class TotalConfig:
     """顶级配置类，整合所有子配置。"""
-    mode: str="train_sft"
+    # mode: str="train_sft"
     """
     above config can be tokenize/train_sft/train_rl to choose the running mode
     - tokenize: only do tokenization and data preparation.
@@ -155,7 +157,7 @@ class TotalConfig:
     - train_sft: supervised fine-tuning mode
     - train_rl: reinforcement learning mode,we use the Trace-RL
     """
-    training: TrainingConfig = field(default_factory=TrainingConfig)
+    trainer: TrainingConfig = field(default_factory=TrainingConfig)
     data: dataConfig = field(default_factory=dataConfig)
     model: modelConfig = field(default_factory=modelConfig)
     optim:OptimizerConfig = field(default_factory=OptimizerConfig)
